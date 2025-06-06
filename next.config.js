@@ -41,29 +41,83 @@ const withPWA = require('next-pwa')({
   ],
 });
 
+// Determine the base URL based on the environment
+const isProduction = process.env.NODE_ENV === 'production';
+const basePath = isProduction ? process.env.BASE_PATH || '' : '';
+
 const nextConfig = {
-  reactStrictMode: true,
+  // Enable standalone output for Docker
+  output: 'standalone',
+  
+  // Set base path if provided
+  basePath,
+  
+  // Configure images
   images: {
     domains: ['localhost'],
+    unoptimized: true, // Disable Image Optimization API for Docker
   },
+  
+  // Enable React Strict Mode
+  reactStrictMode: true,
+  
+  // Webpack configuration
   webpack: (config) => {
-    config.resolve.fallback = { fs: false, net: false, tls: false };
+    // Required for Dexie.js to work with Next.js
+    config.resolve.fallback = { 
+      ...config.resolve.fallback,
+      fs: false,
+      net: false,
+      tls: false,
+      crypto: false,
+      stream: false,
+      path: false,
+      os: false,
+      http: false,
+      https: false,
+      zlib: false,
+    };
+    
     return config;
   },
+  
+  // Custom headers
   async headers() {
     return [
       {
-        // Apply these headers to all routes
         source: '/(.*)',
         headers: [
           {
             key: 'Permissions-Policy',
             value: 'geolocation=(self)',
           },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
         ],
       },
     ];
   },
+  
+  // Environment variables
+  env: {
+    NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000',
+  },
+  
+  // Disable telemetry in production
+  telemetry: false,
+  
+  // Enable static export for PWA
+  trailingSlash: true,
 };
 
 module.exports = withPWA(nextConfig);
