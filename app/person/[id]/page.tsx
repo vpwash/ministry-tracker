@@ -8,8 +8,11 @@ import { Person, getPersonWithNotes, deletePerson } from '@/lib/db';
 import { PersonForm } from '@/components/person-form';
 import { NoteForm } from '@/components/note-form';
 import { format, parseISO } from 'date-fns';
+import { toast } from 'sonner';
 import { cn, titleCase } from '@/lib/utils';
-import { FiArrowLeft, FiEdit2, FiTrash2, FiPhone, FiMail, FiMapPin, FiCalendar, FiClock, FiUser } from 'react-icons/fi';
+import { getMapProvider } from '@/lib/settings';
+import { FiArrowLeft, FiEdit2, FiTrash2, FiPhone, FiMail, FiMapPin, FiCalendar, FiClock, FiUser, FiX } from 'react-icons/fi';
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 export default function PersonDetail() {
   const params = useParams();
@@ -18,6 +21,7 @@ export default function PersonDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const loadPerson = async () => {
     try {
@@ -41,17 +45,14 @@ export default function PersonDetail() {
   }, [params.id]);
 
   const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this person? This action cannot be undone.')) {
-      return;
-    }
-
+    setShowDeleteDialog(false);
     setIsDeleting(true);
     try {
       await deletePerson(Number(params.id));
       router.push('/');
     } catch (error) {
       console.error('Error deleting person:', error);
-      alert('Failed to delete person. Please try again.');
+      toast.error('Failed to delete person. Please try again.');
       setIsDeleting(false);
     }
   };
@@ -151,16 +152,43 @@ export default function PersonDetail() {
                   <FiEdit2 className="h-3.5 w-3.5" />
                   <span>Edit</span>
                 </Button>
-                <Button 
-                  variant="destructive" 
-                  size="sm"
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  className="gap-1.5"
-                >
-                  <FiTrash2 className="h-3.5 w-3.5" />
-                  <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
-                </Button>
+                <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                  <DialogTrigger asChild>
+                    <Button 
+                      variant="destructive" 
+                      disabled={isDeleting}
+                      className="w-full sm:w-auto"
+                    >
+                      <FiTrash2 className="mr-2 h-4 w-4" />
+                      {isDeleting ? 'Deleting...' : 'Delete Person'}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Delete Contact</DialogTitle>
+                      <DialogDescription>
+                        Are you sure you want to delete {person.name}? This action cannot be undone.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setShowDeleteDialog(false)}
+                        disabled={isDeleting}
+                      >
+                        Cancel
+                      </Button>
+                      <Button 
+                        variant="destructive" 
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                      >
+                        <FiTrash2 className="mr-2 h-4 w-4" />
+                        {isDeleting ? 'Deleting...' : 'Delete Contact'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
           </CardHeader>
@@ -181,12 +209,27 @@ export default function PersonDetail() {
                         className="text-xs justify-start"
                         onClick={() => {
                           const encodedAddress = encodeURIComponent(person.address || '');
-                          const url = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+                          const mapProvider = getMapProvider();
+                          let url = '';
+                          
+                          switch (mapProvider) {
+                            case 'apple':
+                              url = `https://maps.apple.com/?q=${encodedAddress}`;
+                              break;
+                            case 'waze':
+                              url = `https://www.waze.com/ul?q=${encodedAddress}&navigate=yes`;
+                              break;
+                            case 'google':
+                            default:
+                              url = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+                              break;
+                          }
+                          
                           window.open(url, '_blank', 'noopener,noreferrer');
                         }}
                       >
                         <FiMapPin className="h-3 w-3 mr-1" />
-                        View on Map
+                        View on {getMapProvider() === 'apple' ? 'Apple Maps' : getMapProvider().charAt(0).toUpperCase() + getMapProvider().slice(1)}
                       </Button>
                     </div>
                   </div>

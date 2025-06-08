@@ -2,14 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useTheme } from '../../components/theme-provider';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from '../../components/ui/label';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
+import { Switch } from '../../components/ui/switch';
 import { addTerritory, getTerritories, deleteTerritory, territoryExists } from '@/lib/territory';
-import { isGeolocationEnabled, setGeolocationEnabled } from '@/lib/settings';
+import { isGeolocationEnabled, setGeolocationEnabled, getMapProvider, setMapProvider } from '@/lib/settings';
+type MapProvider = 'google' | 'apple' | 'waze';
 import { toast } from 'sonner';
+import { getAllPeople, addPerson, deletePerson, Person } from '@/lib/db';
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 interface Territory {
   id?: number;
@@ -26,11 +30,15 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [lastAddedTerritory, setLastAddedTerritory] = useState<Territory | null>(null);
   const [locationEnabled, setLocationEnabled] = useState(false);
+  const [mapProvider, setMapProviderState] = useState<MapProvider>('google');
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     loadTerritories();
-    // Load geolocation setting
+    // Load settings
     setLocationEnabled(isGeolocationEnabled());
+    setMapProviderState(getMapProvider());
   }, []);
 
   const loadTerritories = async () => {
@@ -306,6 +314,270 @@ export default function SettingsPage() {
               </p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Contact Management</CardTitle>
+          <CardDescription>Import or export your contacts</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Button 
+              variant="outline" 
+              onClick={async () => {
+                try {
+                  const people = await getAllPeople();
+                  const data = JSON.stringify(people, null, 2);
+                  const blob = new Blob([data], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `ministry-contacts-${new Date().toISOString().split('T')[0]}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  toast.success('Contacts exported successfully');
+                } catch (error) {
+                  console.error('Error exporting contacts:', error);
+                  toast.error('Failed to export contacts');
+                }
+              }}
+            >
+              Export Contacts
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = async (e) => {
+                  const file = (e.target as HTMLInputElement).files?.[0];
+                  if (!file) return;
+                  
+                  try {
+                    const text = await file.text();
+                    const contacts = JSON.parse(text) as Person[];
+                    
+                    if (!Array.isArray(contacts)) {
+                      throw new Error('Invalid contacts format');
+                    }
+                    
+                    // Add each contact
+                    for (const contact of contacts) {
+                      // Remove id to avoid conflicts
+                      const { id, ...contactData } = contact;
+                      await addPerson(contactData);
+                    }
+                    
+                    toast.success(`Successfully imported ${contacts.length} contacts`);
+                  } catch (error) {
+                    console.error('Error importing contacts:', error);
+                    toast.error('Failed to import contacts. Please check the file format.');
+                  }
+                };
+                input.click();
+              }}
+            >
+              Import Contacts
+            </Button>
+            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  variant="destructive" 
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete All Contacts'}
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Are you absolutely sure?</DialogTitle>
+                  <DialogDescription>
+                    This action cannot be undone. This will permanently delete all your contacts.
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setIsDeleteDialogOpen(false)}
+                    disabled={isDeleting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="destructive" 
+                    onClick={async () => {
+                      try {
+                        setIsDeleting(true);
+                        // First get count of contacts
+                        const people = await getAllPeople();
+                        const count = people.length;
+                        
+                        if (count === 0) {
+                          toast.info('No contacts to delete');
+                          return;
+                        }
+                        
+                        // Delete all contacts
+                        await Promise.all(people.map(person => 
+                          person.id !== undefined && deletePerson(person.id)
+                        ));
+                        
+                        toast.success(`Successfully deleted ${count} contact${count !== 1 ? 's' : ''}`);
+                      } catch (error) {
+                        console.error('Error deleting contacts:', error);
+                        toast.error('Failed to delete contacts');
+                      } finally {
+                        setIsDeleting(false);
+                        setIsDeleteDialogOpen(false);
+                      }
+                    }}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? 'Deleting...' : `Delete ${isDeleting ? '' : 'All Contacts'}`}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Map Settings</CardTitle>
+          <CardDescription>Configure your preferred map provider and location settings</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <Label>Enable Location Services</Label>
+                <p className="text-sm text-muted-foreground">
+                  Allow the app to access your location for territory mapping
+                </p>
+              </div>
+              <Switch
+                id="location-enabled"
+                checked={locationEnabled}
+                onCheckedChange={(checked: boolean) => {
+                  setGeolocationEnabled(checked);
+                  setLocationEnabled(checked);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>Default Map Provider</Label>
+              <p className="text-sm text-muted-foreground">
+                Choose your preferred map service for directions
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setMapProvider('google');
+                  setMapProviderState('google');
+                }}
+                className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-colors ${
+                  mapProvider === 'google'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-muted-foreground/20 hover:bg-muted/50'
+                }`}
+              >
+                <div className="h-10 w-10 mb-2 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" className="h-8 w-8">
+                    <path
+                      fill="#4285F4"
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    />
+                  </svg>
+                </div>
+                <span className="font-medium">Google Maps</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMapProvider('apple');
+                  setMapProviderState('apple');
+                }}
+                className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-colors ${
+                  mapProvider === 'apple'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-muted-foreground/20 hover:bg-muted/50'
+                }`}
+              >
+                <div className="h-10 w-10 mb-2 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" className="h-8 w-8">
+                    <path
+                      fill="#000000"
+                      d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"
+                    />
+                  </svg>
+                </div>
+                <span className="font-medium">Apple Maps</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMapProvider('waze');
+                  setMapProviderState('waze');
+                }}
+                className={`flex flex-col items-center justify-center p-4 rounded-lg border-2 transition-colors ${
+                  mapProvider === 'waze'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-muted-foreground/20 hover:bg-muted/50'
+                }`}
+              >
+                <div className="h-10 w-10 mb-2 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" className="h-8 w-8">
+                    <path
+                      fill="#33CCFF"
+                      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
+                    />
+                    <path
+                      fill="#33CCFF"
+                      d="M12 4c-4.41 0-8 3.59-8 8s3.59 8 8 8 8-3.59 8-8-3.59-8-8-8zm0 14c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"
+                    />
+                    <path
+                      fill="#33CCFF"
+                      d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"
+                    />
+                    <path
+                      fill="#33CCFF"
+                      d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"
+                    />
+                    <path
+                      fill="#33CCFF"
+                      d="M12 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"
+                    />
+                  </svg>
+                </div>
+                <span className="font-medium">Waze</span>
+              </button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

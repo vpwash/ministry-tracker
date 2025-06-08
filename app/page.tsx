@@ -317,8 +317,8 @@ export default function Home() {
                         <div className="flex justify-between items-start">
                           <div>
                             <CardTitle className="text-lg">{titleCase(person.name || '')}</CardTitle>
-                            <CardDescription className="space-y-1">
-                              {person.address && (
+                            {person.address && (
+                              <CardDescription className="space-y-1">
                                 <div className="whitespace-pre-line">
                                   {person.address.split(',').map((part, index, parts) => (
                                     <span key={index}>
@@ -327,8 +327,8 @@ export default function Home() {
                                     </span>
                                   ))}
                                 </div>
-                              )}
-                            </CardDescription>
+                              </CardDescription>
+                            )}
                           </div>
                           {distance !== null && (
                             <div className="flex items-center text-sm text-gray-500">
